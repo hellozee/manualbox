@@ -23,24 +23,16 @@ from pprint import pprint
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from . import manualboxinput
-from .widgets import MountEdit
-from .utils import get_asset_path
-
 try:
     # This is for Debian/Ubuntu
     from fusepy import FUSE, FuseOSError, Operations, LoggingMixIn
 except ModuleNotFoundError:
     from fuse import FUSE, FuseOSError, Operations, LoggingMixIn
 
-    from PyQt5 import QtGui, QtWidgets, QtCore
+from PySide2.QtWidgets import QApplication
+from PySide2.QtQml import QQmlApplicationEngine
+from PySide2.QtCore import QObject, Signal, Slot, QUrl, Property, QThread
 
-
-from PyQt5.QtGui import *
-from PyQt5.QtWidgets import *
-from PyQt5.QtCore import *
-from PyQt5 import QtWidgets
-from PyQt5 import QtCore
 import sys
 import os
 
@@ -331,7 +323,7 @@ class ManualBoxFS(LoggingMixIn, Operations):
 
 
 class FSThread(QThread):
-    signal = pyqtSignal("PyQt_PyObject")
+    signal = Signal(str)
 
     def __init__(self, mountpath="", password=""):
         QThread.__init__(self)
@@ -367,94 +359,19 @@ class FSThread(QThread):
             print("Wrong key for the ~/.manualbox")
 
 
-class MainUserWindow(QMainWindow):
-    userinput = pyqtSignal("PyQt_PyObject")
-    CSS = """
-            QLabel#filepath {
-                color: black;
-                font-size: 25px;
-                background-color: rgb(255,255,255);
-            }
-            QPushButton#mountpathButton {
-                background-color: rgb(255,255,255);
-                font-size: 20px;
-            }
-            QPushButton#umountpathButton {
-                background-color: rgb(255,255,255);
-                font-size: 20px;
-            }
-            QPushButton {
-                background-color: rgb(255,255,255);
-            }
+class MBGuiController(QObject):
 
-
-    """
-
-    def __init__(self, parent=None):
+    def __init__(self):
+        QObject.__init__(self)
+        
+        self.mountButtonText = "Mount"
+        self.outputAreaContent = ""
+        self.password = ""
         self.home = str(Path.home())
         self.path = os.path.join(self.home, "secured")
         storagepath = os.path.join(self.home, ".manualbox")
         self.mounted = False
-        super(MainUserWindow, self).__init__(parent)
-        self.layout = QVBoxLayout()
-
-        iconlabel = QLabel(pixmap=QPixmap(get_asset_path("mainicon.png")))
-        self.buttonslayout = QHBoxLayout()
-        self.buttonslayout.addWidget(iconlabel)
-
-        formlayout = QFormLayout()
-
-        mountpathLabel = QLabel("Mount path  (empty for default):")
-        self.mountpathTxt = MountEdit()
-
-        passwordlabel = QLabel("Password:")
-        self.passwordTxt = QLineEdit()
-        self.passwordTxt.setEchoMode(QLineEdit.Password)
-
-        formlayout.addRow(mountpathLabel, self.mountpathTxt)
-        formlayout.addRow(passwordlabel, self.passwordTxt)
-        form = QWidget()
-        form.setLayout(formlayout)
-
-        self.mountpathButton = QPushButton("Mount")
-        self.mountpathButton.setObjectName("mountpathButton")
-        self.mountpathButton.setFixedHeight(60)
-        self.mountpathButton.setFixedWidth(100)
-        self.mountpathButton.clicked.connect(self.mount)
-        self.umountpathButton = QPushButton("Unmount")
-        self.umountpathButton.setObjectName("umountpathButton")
-        self.umountpathButton.setFixedHeight(60)
-        self.umountpathButton.setFixedWidth(100)
-        self.umountpathButton.clicked.connect(self.unmount)
-        self.umountpathButton.hide()
-        self.buttonslayout.addWidget(form)
-
-        self.buttonslayout.addWidget(self.mountpathButton)
-        self.buttonslayout.addWidget(self.umountpathButton)
-        buttons = QWidget()
-        buttons.setLayout(self.buttonslayout)
-        self.layout.addWidget(buttons)
-        self.textarea = QTextEdit()
-        self.textarea.setReadOnly(True)
-        self.layout.addWidget(self.textarea)
-        mainw = QWidget()
-        mainw.setLayout(self.layout)
-        self.setCentralWidget(mainw)
-        self.setFixedWidth(900)
-        self.setFixedHeight(480)
         self.fs = None
-        self.trayIcon = QSystemTrayIcon(self)
-        self.trayIcon.setIcon(QIcon(QPixmap(get_asset_path("trayicon.png"))))
-
-        self.quitAction = QAction("Exit", self)
-        self.quitAction.triggered.connect(self.handleQuit)
-        self.trayMenu = QMenu()
-        self.trayMenu.addAction(self.quitAction)
-        self.trayIcon.setContextMenu(self.trayMenu)
-        self.trayIcon.activated.connect(self.view_toggle)
-        self.trayIcon.show()
-        self.setStyleSheet(self.CSS)
-        self.setWindowTitle("ManualBox")
 
         # now check if we have a ~/.manualbox
         if not os.path.exists(storagepath):
@@ -467,102 +384,102 @@ class MainUserWindow(QMainWindow):
             self.passwordTxt.setText(key_text)
             # now call mount
             self.mount()
-
-    def view_toggle(self, reason):
-        "To handle clicks on the tray icon"
-        if reason == 1:
-            self.trayMenu.show()
-            return
-        if self.isVisible():
-            self.hide()
+    
+    buttonTextChanged = Signal(str)
+    outputChanged = Signal(str)
+    directoryChanged = Signal(str)
+    passwordChanged = Signal(str)
+    
+    @Slot()
+    def buttonClicked(self):
+        if self.mounted:
+            self.mount()
         else:
-            self.show()
-
-    def closeEvent(self, event):
-        "MainWindow closing event"
-        if not self.mounted:
-            qApp.quit()
-        else:
-            event.ignore()
-            self.hide()
-            self.trayIcon.showMessage(
-                "ManualBox",
-                "Application was minimized to Tray",
-                QSystemTrayIcon.Information,
-                2000,
-            )
+            self.unmount()
+    
+    def get_buttonText(self):
+        return self.mountButtonText
+    
+    def set_buttonText(self, text):
+        self.mountButtonText = text
+        self.buttonTextChanged.emit(self.mountButtonText)
+        pass
+    
+    def get_outputAreaContent(self):
+        return self.outputAreaContent
+    
+    def set_outputAreaContent(self, content):
+        self.outputAreaContent = content
+        self.outputChanged.emit(self.outputAreaContent)
+        pass
+    
+    def set_directory(self, folder):
+        self.path = folder
+        self.directoryChanged.emit(self.path)
+        pass
+    
+    def get_directory(self):
+        return self.path
+    
+    def set_password(self, password):
+        self.password = password
+        self.passwordChanged.emit(self.password)
+        pass
+    
+    def get_password(self):
+        return self.password
+    
+    buttonText = Property(str, get_buttonText, notify=buttonTextChanged)
+    outputContent = Property(str, get_outputAreaContent, notify=outputChanged)
+    currentDir = Property(str, get_directory, set_directory, notify=directoryChanged)
+    currentPass = Property(str, get_password, set_password, notify=passwordChanged)
 
     def addText(self, newtext):
-        text = self.textarea.toPlainText() + "\n"
-        text += newtext
-        self.textarea.setText(text)
-
-    def handleQuit(self):
-        if self.mounted:
-            self.trayIcon.showMessage(
-                "ManualBox",
-                "Please unmount first and then quit.",
-                QSystemTrayIcon.Information,
-                5000,
-            )
-        else:
-            qApp.quit()
+        self.set_outputAreaContent(self.outputAreaContent + "\n" + newtext)
 
     def msg_show(self, text):
         self.trayIcon.showMessage("ManualBox", text, QSystemTrayIcon.Information, 2000)
 
     def mount(self):
         "Mounts the provided path"
-        self.path = str(self.mountpathTxt.text())
         if not self.path:
-            self.path = os.path.join(self.home, "secured")
+            self.set_directory(path.join(self.home, "secured"))
             try:
                 os.mkdir(self.path)
             except FileExistsError:
                 pass
-            self.mountpathTxt.setText(self.path)
 
         # Now verify that the mount path exists
         if not os.path.exists(self.path):
-            self.textarea.setText(
+            self.set_outputAreaContent(
                 f'The mount path <font color="red"><b>{self.path}</b></font> does not exist.'
             )
             return
         # Verify that the mount path is empty
         if len(os.listdir(self.path)) != 0:
-            self.textarea.setText(
+            self.set_outputAreaConten(
                 f'The mount path <font color="red"><b>{self.path}</b></font> is not empty. Please select an empty directory.'
             )
             return
 
-        password = str(self.passwordTxt.text())
-
         try:
-            self.fs = FSThread(self.path, password)
+            self.fs = FSThread(self.path, self.password)
         except (ValueError, InvalidToken, binascii.Error):
-            self.textarea.setText(
+            self.set_outputAreaContent(
                 "Wrong password for the ~/.manualbox storage. Please try again."
             )
             return
         self.fs.signal.connect(self.asktheuser, QtCore.Qt.BlockingQueuedConnection)
         self.userinput.connect(self.fs.updateuserinput)
         self.fs.start()
-        self.mountpathButton.hide()
-        self.umountpathButton.show()
-        self.passwordTxt.setEnabled(False)
-        self.mountpathTxt.setEnabled(False)
+        self.set_buttonText("Unmount")
         self.mounted = True
         self.addText(f"Successfully decrypted and mounted at {self.path}")
-        # On mac the UI is not updating properly otherwise
-        self.repaint()
 
     def unmount(self):
         "Unmounts the filesystem"
         self.fs.fs.saveondisk()
-        self.passwordTxt.setEnabled(True)
-        self.mountpathTxt.setEnabled(True)
-        self.umountpathButton.hide()
-        self.mountpathButton.show()
+        self.set_buttonText("Mount")
         self.mounted = False
 
         # On mac we have to unmount
@@ -571,31 +488,27 @@ class MainUserWindow(QMainWindow):
         else:
             subprocess.check_output(["fusermount", "-u", self.path])
 
-        self.textarea.setText(
+        self.set_outputAreaContent(
             """Unmounted successfully.
 
 Encrypting the data into the storage on disk.
 Encryption and storage is successful.
 To use again, please click on the Mount button."""
         )
-        self.repaint()
-
-    def asktheuser(self, display_path):
-        logging.debug(f"ASKTHEUSER called with {display_path}")
-        self.msg_show(f"Accesing: {display_path}")
-        result = manualboxinput.main(display_path)
-        # On mac the UI is not updating properly otherwise
-        self.userinput.emit(result)
 
 
 def main():
     logging.basicConfig(level=logging.INFO, filename="/dev/null")
-    app = QtWidgets.QApplication(sys.argv)
-    form = MainUserWindow()
-    form.show()
-    form.setWindowState(Qt.WindowState.WindowActive)
-    form.raise_()
-    app.exec_()
+    app = QApplication(sys.argv)
+    engine = QQmlApplicationEngine()
+    gui_controller = MBGuiController()
+    engine.rootContext().setContextProperty("guiController", gui_controller)
+    engine.load(QUrl("manualbox/main.qml"))
+
+    if not engine.rootObjects():
+        sys.exit(-1)
+
+    sys.exit(app.exec_())
 
 
 if __name__ == "__main__":
